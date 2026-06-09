@@ -1,0 +1,970 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SOTREG - Gestion de Flotte Intégrale</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+    <style>
+        /* =========================================
+           1. RESET & LAYOUT GLOBAL
+           ========================================= */
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', sans-serif; }
+        body { background-color: #f8fafc; position: relative; }
+        .app-container { display: grid; grid-template-columns: 210px 1fr; min-height: 100vh; transition: grid-template-columns 0.3s ease; }
+        .app-container.menu-closed { grid-template-columns: 0px 1fr; }
+
+        /* =========================================
+           2. SIDEBAR (MENU LATÉRAL VERT)
+           ========================================= */
+        .sidebar { background-color: #27ae60; color: white; padding: 0; width: 210px; transition: transform 0.3s ease; position: relative; z-index: 10; box-shadow: 2px 0 10px rgba(0,0,0,0.1); }
+        .sidebar.closed { transform: translateX(-210px); }
+        .sidebar-brand { padding: 25px 15px; border-bottom: 1px solid rgba(255,255,255,0.2); margin-bottom: 10px; }
+        .brand-header { display: flex; align-items: center; justify-content: space-between; }
+        .sidebar-brand h2 { font-size: 1.6rem; font-weight: bold; margin: 0; letter-spacing: 0.5px; }
+        .sidebar-menu { list-style: none; }
+        .sidebar-menu a.menu-link { display: block; padding: 14px 20px; color: white; text-decoration: none; font-weight: bold; font-size: 0.95rem; transition: all 0.2s; white-space: nowrap; }
+        .sidebar-menu a.menu-link:hover, .sidebar-menu a.menu-link.active { background-color: #1e8449; padding-left: 25px; }
+        
+        /* Sous-menus */
+        .submenu { list-style: none; background-color: #196f3d; max-height: 0; overflow: hidden; transition: max-height 0.3s ease-out; }
+        .submenu.open { max-height: 120px; }
+        .submenu li a.submenu-link { display: block; padding: 10px 35px; color: #cbd5e1; text-decoration: none; font-size: 0.88rem; font-weight: 600; transition: all 0.2s; }
+        .submenu li a.submenu-link:hover, .submenu li a.submenu-link.active-sub { color: #ffffff; background-color: #145a32; padding-left: 42px; }
+        
+        /* Bouton pour réduire le menu */
+        .toggle-btn { background-color: #1e8449; color: white; border: none; border-radius: 4px; width: 28px; height: 32px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+        .sidebar.closed .toggle-btn { position: fixed; top: 25px; left: -40px; z-index: 999; }
+
+        /* =========================================
+           3. HEADER FLOTTANT & RECHERCHE
+           ========================================= */
+        .top-left-header { position: fixed; top: 12px; left: 258px; z-index: 999; display: flex; align-items: center; gap: 12px; transition: left 0.3s ease; }
+        .app-container.menu-closed ~ .top-left-header { left: 98px; }
+        .search-box { display: flex; align-items: center; background-color: rgba(255, 255, 255, 0.95); border: 1px solid #ccc; border-radius: 4px; padding: 2px 6px; box-shadow: 0 1px 5px rgba(0,0,0,0.15); transition: all 0.25s ease-in-out; }
+        .search-box.hidden-search { opacity: 0; visibility: hidden; width: 0; padding: 0; margin: 0; border: none; pointer-events: none; }
+        .search-box input { border: none; outline: none; padding: 6px 8px; font-size: 0.85rem; width: 200px; background: transparent; color: #2c3e50; }
+        .live-clock { background-color: rgba(255, 255, 255, 0.95); padding: 7px 15px; border-radius: 6px; box-shadow: 0 1px 5px rgba(0,0,0,0.15); border: 1px solid #ccc; font-size: 0.9rem; white-space: nowrap; color: #2c3e50; }
+
+        /* =========================================
+           4. ZONES DE CONTENU (TABS)
+           ========================================= */
+        .main-content { background-color: #f8fafc; padding: 0; width: 100%; height: 100vh; overflow: hidden; }
+        .tab-content { display: none; width: 100%; height: 100%; }
+        .tab-content.active { display: block; }
+        .section-padding { padding: 80px 30px 30px 30px; overflow-y: auto; height: 100%; }
+        .sub-tab-content { display: none; }
+        .sub-tab-content.active-sub-content { display: block; }
+        
+        /* Carte Leaflet */
+        .map-card { width: 100%; height: 100vh; }
+        #map { height: 100%; width: 100%; z-index: 1; }
+
+        /* =========================================
+           5. KPI & EN-TÊTES
+           ========================================= */
+        .kpi-container { display: flex; gap: 20px; margin-bottom: 25px; }
+        .kpi-card { background: white; border: 1px solid #e2e8f0; padding: 20px; border-radius: 8px; flex: 1; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); border-left: 5px solid #64748b; }
+        .kpi-card h3 { font-size: 0.75rem; font-weight: 700; color: #64748b; margin-bottom: 5px; text-transform: uppercase; }
+        .kpi-card p { font-size: 1.8rem; font-weight: 800; color: #1e293b; }
+        .kpi-mission { border-left-color: #27ae60; }
+        .kpi-repos { border-left-color: #ef4444; }
+
+        .content-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; border-bottom: 2px solid #e2e8f0; padding-bottom: 15px; }
+        .content-header h2 { color: #1e293b; font-size: 1.4rem; font-weight: 700; }
+        .filter-group { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+        .filter-group select, .filter-group input { padding: 8px 15px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.9rem; outline: none; background: white; color: #334155; }
+        .filter-group select:focus, .filter-group input:focus { border-color: #27ae60; }
+
+        /* =========================================
+           6. TABLEAUX & ÉTATS VISUELS
+           ========================================= */
+        .table-container { background: white; border-radius: 8px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); border: 1px solid #e2e8f0; overflow: auto; }
+        .custom-table { width: 100%; border-collapse: collapse; text-align: left; font-size: 0.9rem; }
+        .custom-table th { background-color: #f1f5f9; color: #475569; font-weight: 600; padding: 12px 16px; border-bottom: 2px solid #e2e8f0; text-transform: uppercase; font-size: 0.8rem; white-space: nowrap; }
+        .custom-table td { padding: 12px 16px; color: #334155; border-bottom: 1px solid #e2e8f0; vertical-align: middle; }
+        .custom-table tbody tr:hover { background-color: #f8fafc; }
+        .text-center { text-align: center !important; }
+
+        /* Tableau Quotidien - Lignes intelligentes */
+        .custom-table tbody tr.cell-valide-verte, .custom-table tbody tr.cell-valide-verte td { background-color: #dcfce7 !important; }
+        .custom-table tbody tr.cell-valide-verte { box-shadow: inset 0 0 10px rgba(34, 197, 94, 0.4); border-left: 4px solid #22c55e !important; }
+        
+        .custom-table tbody tr.cell-attente-orange, .custom-table tbody tr.cell-attente-orange td { background-color: #fff7ed !important; }
+        .custom-table tbody tr.cell-attente-orange { box-shadow: inset 0 0 10px rgba(249, 115, 22, 0.2); border-left: 4px solid #f97316 !important; }
+
+        .custom-table tbody tr.cell-alerte-rouge { background-color: #fef2f2 !important; animation: clignotementRouge 1.5s infinite ease-in-out !important; border-left: 4px solid #b91c1c !important; }
+        @keyframes clignotementRouge {
+            0% { box-shadow: inset 0 0 14px rgba(136, 19, 19, 0.8); }
+            50% { box-shadow: inset 0 0 4px rgba(136, 19, 19, 0.2); }
+            100% { box-shadow: inset 0 0 14px rgba(136, 19, 19, 0.8); }
+        }
+
+        /* Alerte pour les dates (Rouge si expiré/proche) */
+        .date-alerte-rouge { color: #ef4444; font-weight: bold; background-color: #fee2e2; padding: 2px 6px; border-radius: 4px; display: inline-block; border: 1px solid #fca5a5; }
+
+        /* Badges */
+        .provider-badge { background-color: #f0fdf4; color: #166534; border: 1px solid #bbf7d0; padding: 4px 8px; border-radius: 4px; font-size: 0.78rem; font-weight: 700; }
+        .site-badge { background-color: #f1f5f9; color: #475569; padding: 4px 8px; border-radius: 4px; font-size: 0.8rem; font-weight: 600; border: 1px solid #e2e8f0; white-space: nowrap; }
+        .status-badge { padding: 4px 8px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; display: inline-block; text-align: center; }
+        .status-on { background-color: #dcfce7; color: #15803d; border: 1px solid #bbf7d0; }
+        .status-off { background-color: #fee2e2; color: #b91c1c; border: 1px solid #fca5a5; } 
+
+        /* =========================================
+           7. FORMULAIRES & BOUTONS
+           ========================================= */
+        .action-buttons { display: flex; gap: 6px; justify-content: center; align-items: center; }
+        .btn-action { background: white; border: 1px solid #cbd5e1; padding: 5px 8px; border-radius: 6px; cursor: pointer; font-size: 0.85rem; transition: all 0.2s ease; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
+        .btn-action.active-sub-btn { background: #1e293b; color: white; border-color: #0f172a; }
+        .form-container { background: white; padding: 30px; border-radius: 8px; border: 1px solid #e2e8f0; max-width: 500px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); }
+        .form-group { margin-bottom: 20px; display: flex; flex-direction: column; gap: 8px; }
+        .form-group label { font-weight: 600; color: #475569; font-size: 0.9rem; }
+        .form-group input, .form-group select { padding: 10px 14px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.95rem; outline: none; width: 100%; }
+        .btn-submit { background-color: #27ae60; color: white; border: none; padding: 12px 20px; border-radius: 6px; font-size: 1rem; font-weight: bold; cursor: pointer; width: 100%; margin-top: 10px; transition: background 0.3s; }
+        .btn-submit:hover { background-color: #1e8449; }
+
+        /* Pagination & Drag */
+        .pagination-container { display: flex; justify-content: center; align-items: center; gap: 20px; margin-top: 20px; font-size: 0.9rem; color: #475569; font-weight: 600; }
+        .drag-profile-card { padding: 12px 18px; border-radius: 6px; font-weight: 700; cursor: grab; box-shadow: 0 2px 4px rgba(0,0,0,0.1); color: white; }
+    </style>
+</head>
+<body>
+
+    <div id="top-left-header" class="top-left-header">
+        <div class="search-box" id="main-search-box">
+            <input type="text" id="search-input" placeholder="Rechercher une ville, adresse..." />
+            <button id="search-btn">🔍</button>
+        </div>
+        <div id="live-clock" class="live-clock"></div>
+    </div>
+
+    <div class="app-container" id="appLayout">
+        <nav class="sidebar" id="sidebarMenu">
+            <div class="sidebar-brand">
+                <div class="brand-header">
+                    <h2>SOTREG</h2>
+                    <button id="toggle-menu-btn" class="toggle-btn">◀</button>
+                </div>
+            </div>
+            <ul class="sidebar-menu">
+                <li><a href="#" class="menu-link active" data-target="section-flotte">Flotte</a></li>
+                <li class="has-submenu">
+                    <a href="#" class="menu-link" data-target="section-conducteur" id="btn-conducteur">Conducteur ▾</a>
+                    <ul class="submenu" id="submenu-conducteur">
+                        <li><a href="#" class="submenu-link" data-sub-target="sub-conducteur-liste">Etat conducteur</a></li>
+                        <li><a href="#" class="submenu-link" data-sub-target="sub-conducteur-ajouter">Nouveau</a></li>
+                    </ul>
+                </li>
+                <li class="has-submenu">
+                    <a href="#" class="menu-link" data-target="section-vehicule" id="btn-vehicule">Véhicule ▾</a>
+                    <ul class="submenu" id="submenu-vehicule">
+                        <li><a href="#" class="submenu-link" data-sub-target="sub-vehicule-liste">Etat véhicule</a></li>
+                        <li><a href="#" class="submenu-link" data-sub-target="sub-vehicule-ajouter">Nouveau</a></li>
+                    </ul>
+                </li>
+                <li class="has-submenu">
+                    <a href="#" class="menu-link" data-target="section-trajet" id="btn-trajet">Trajet ▾</a>
+                    <ul class="submenu" id="submenu-trajet">
+                        <li><a href="#" class="submenu-link" data-sub-target="sub-trajet-liste">Etat trajet</a></li>
+                        <li><a href="#" class="submenu-link" data-sub-target="sub-trajet-ajouter">Nouveau</a></li>
+                    </ul>
+                </li>
+                <li><a href="#" class="menu-link" data-target="section-planning">Planning</a></li>
+                <li><a href="#" class="menu-link" data-target="section-reclamation">Réclamation</a></li>
+                <li><a href="#" class="menu-link" data-target="section-dashboard">Dashboard</a></li>
+                <li><a href="#" class="menu-link" data-target="section-reporting">Reporting</a></li>
+            </ul>
+        </nav>
+
+        <main class="main-content">
+            <div id="section-flotte" class="tab-content active">
+                <div class="map-card"><div id="map"></div></div>
+            </div>
+             
+            <div id="section-conducteur" class="tab-content section-padding">
+                <div id="sub-conducteur-liste" class="sub-tab-content active-sub-content">
+                    <div class="kpi-container">
+                        <div class="kpi-card"><h3>TOTAL CONDUCTEURS</h3><p id="kpi-total">0</p></div>
+                        <div class="kpi-card kpi-mission"><h3>EN MISSION</h3><p id="kpi-mission">0</p></div>
+                        <div class="kpi-card kpi-repos"><h3>EN REPOS</h3><p id="kpi-repos">0</p></div>
+                    </div>
+                    <div class="content-header">
+                        <h2>Gestion des Conducteurs — Etat conducteur</h2>
+                        <div class="filter-group">
+                            <select id="provider-filter" onchange="filtrerConducteurs()"><option value="Tous">Tous prestataires</option><option value="SOTREG">SOTREG</option><option value="STCR">STCR</option><option value="MANAVETTE">MANAVETTE</option><option value="CTM">CTM</option><option value="SUPRATOUR">SUPRATOUR</option></select>
+                            <select id="site-filter" onchange="filtrerConducteurs()"><option value="Tous">Tous sites</option><option value="Casablanca">Casablanca</option><option value="Safi">Safi</option><option value="Jorf Lasfar">Jorf Lasfar</option><option value="Khouribga" selected>Khouribga</option><option value="Youssoufia">Youssoufia</option><option value="Benguérir">Benguérir</option><option value="Laâyoune">Laâyoune</option><option value="Aucun">Aucun pôle affecté</option></select>
+                            <input type="text" id="driver-search" placeholder="Nom ou matricule..." onkeyup="filtrerConducteurs()">
+                        </div>
+                    </div>
+                    <div class="table-container">
+                        <table class="custom-table">
+                            <thead><tr><th>NOM (MLE)</th><th>PRESTATAIRE</th><th>SITE AFFECTÉ</th><th>PERMIS COND.</th><th>VISITE SYS</th><th>CARTE PROF</th><th>STATUT</th><th class="text-center">ACTIONS</th></tr></thead>
+                            <tbody id="drivers-table-body"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div id="sub-conducteur-ajouter" class="sub-tab-content">
+                    <div class="content-header"><h2>Enregistrer un nouveau conducteur</h2></div>
+                    <div class="form-container">
+                        <form id="add-driver-form" onsubmit="ajouterNouveauConducteur(event)">
+                            <div class="form-group"><label>Nom Complet :</label><input type="text" id="form-nom" required placeholder="Ex: Larbi Alami"></div>
+                            <div class="form-group"><label>Matricule (Mle) :</label><input type="text" id="form-mle" required placeholder="Ex: 59039"></div>
+                            <div class="form-group"><label>Prestataire :</label><select id="form-provider" required><option value="SOTREG">SOTREG</option><option value="STCR">STCR</option><option value="MANAVETTE">MANAVETTE</option><option value="CTM">CTM</option><option value="SUPRATOUR">SUPRATOUR</option></select></div>
+                            <div class="form-group"><label>Pôle d'affectation :</label><select id="form-site"><option value="Aucun">Aucun pôle affecté</option><option value="Casablanca">Casablanca</option><option value="Safi">Safi</option><option value="Jorf Lasfar">Jorf Lasfar</option><option value="Khouribga">Khouribga</option><option value="Youssoufia">Youssoufia</option><option value="Benguérir">Benguérir</option><option value="Laâyoune">Laâyoune</option></select></div>
+                            <div class="form-group"><label>Date d'expiration Permis :</label><input type="date" id="form-permis" required></div>
+                            <div class="form-group"><label>Date Visite Système :</label><input type="date" id="form-visite" required></div>
+                            <div class="form-group"><label>Date d'expiration Carte Prof :</label><input type="date" id="form-prof" required></div>
+                            <button type="submit" class="btn-submit">Valider l'inscription</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            <div id="section-vehicule" class="tab-content section-padding">
+                <div id="sub-vehicule-liste" class="sub-tab-content">
+                    <div class="kpi-container">
+                        <div class="kpi-card"><h3>TOTAL VÉHICULES</h3><p id="kpi-vehicule-total">0</p></div>
+                        <div class="kpi-card kpi-mission"><h3>EN CIRCULATION</h3><p id="kpi-vehicule-actif">0</p></div>
+                        <div class="kpi-card kpi-repos"><h3>EN PANNE</h3><p id="kpi-vehicule-panne">0</p></div>
+                    </div>
+                    <div class="content-header">
+                        <h2>Gestion du Parc Automobile — Etat véhicule</h2>
+                        <div class="filter-group">
+                            <select id="vehicule-provider-filter" onchange="filtrerVehicules()"><option value="Tous">Tous prestataires</option><option value="SOTREG">SOTREG</option><option value="STCR">STCR</option><option value="MANAVETTE">MANAVETTE</option><option value="CTM">CTM</option><option value="SUPRATOUR">SUPRATOUR</option></select>
+                            <select id="vehicule-site-filter" onchange="filtrerVehicules()"><option value="Tous">Tous sites</option><option value="Casablanca">Casablanca</option><option value="Safi">Safi</option><option value="Jorf Lasfar">Jorf Lasfar</option><option value="Khouribga" selected>Khouribga</option><option value="Youssoufia">Youssoufia</option><option value="Benguérir">Benguérir</option><option value="Laâyoune">Laâyoune</option></select>
+                            <input type="text" id="vehicule-search" placeholder="Filtrer par matricule..." onkeyup="filtrerVehicules()">
+                        </div>
+                    </div>
+                    <div class="table-container">
+                        <table class="custom-table">
+                            <thead><tr><th>MATRICULE</th><th>LABEL</th><th>PRESTATAIRE</th><th>SITE AFFECTÉ</th><th>VISITE TECH</th><th>ASSURANCE</th><th>VIGNETTE</th><th>STATUT</th><th class="text-center">ACTIONS</th></tr></thead>
+                            <tbody id="vehicules-table-body"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div id="sub-vehicule-ajouter" class="sub-tab-content">
+                    <div class="content-header"><h2>Ajouter un nouveau véhicule au parc</h2></div>
+                    <div class="form-container">
+                        <form id="add-vehicule-form" onsubmit="ajouterNouveauVehicule(event)">
+                            <div class="form-group"><label>Numéro de Matricule :</label><input type="text" id="form-v-matricule" placeholder="Ex: 12345-A-6" required></div>
+                            <div class="form-group"><label>Label :</label><input type="text" id="form-v-label" placeholder="Ex: 22462" required></div>
+                            <div class="form-group"><label>Prestataire :</label><select id="form-v-provider" required><option value="SOTREG">SOTREG</option><option value="STCR">STCR</option><option value="MANAVETTE">MANAVETTE</option><option value="CTM">CTM</option><option value="SUPRATOUR">SUPRATOUR</option></select></div>
+                            <div class="form-group"><label>Pôle d'affectation (Site) :</label><select id="form-v-site"><option value="Aucun">Aucun (Réserve)</option><option value="Khouribga">Khouribga</option><option value="Casablanca">Casablanca</option><option value="Safi">Safi</option><option value="Jorf Lasfar">Jorf Lasfar</option><option value="Youssoufia">Youssoufia</option><option value="Benguérir">Benguérir</option><option value="Laâyoune">Laâyoune</option></select></div>
+                            <div class="form-group"><label>Échéance Visite Technique :</label><input type="date" id="form-v-visite" required></div>
+                            <div class="form-group"><label>Échéance Assurance :</label><input type="date" id="date-assurance" required></div>
+                            <div class="form-group"><label>Échéance Vignette :</label><input type="date" id="form-v-vignette" required></div>
+                            <button type="submit" class="btn-submit">Enregistrer le véhicule</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            <div id="section-trajet" class="tab-content section-padding">
+                <div id="sub-trajet-liste" class="sub-tab-content">
+                    <div class="kpi-container">
+                        <div class="kpi-card"><h3>TOTAL TRAJETS</h3><p id="kpi-trajet-total">0</p></div>
+                        <div class="kpi-card kpi-mission"><h3>TRAJETS ACTIFS</h3><p id="kpi-trajet-actif">0</p></div>
+                        <div class="kpi-card kpi-repos"><h3>SUSPENDUS</h3><p id="kpi-trajet-suspendu">0</p></div>
+                    </div>
+                    <div class="content-header">
+                        <h2>Planification des Itinéraires — Etat trajet</h2>
+                        <div class="filter-group">
+                            <select id="trajet-provider-filter" onchange="reinitialiserPaginationEtFiltrer()"><option value="Tous">Tous prestataires</option><option value="SOTREG" selected>SOTREG</option><option value="STCR">STCR</option><option value="MANAVETTE">MANAVETTE</option><option value="CTM">CTM</option><option value="SUPRATOUR">SUPRATOUR</option></select>
+                            <select id="trajet-site-filter" onchange="reinitialiserPaginationEtFiltrer()"><option value="Tous">Tous sites</option><option value="Khouribga" selected>Khouribga</option><option value="Casablanca">Casablanca</option><option value="Safi">Safi</option><option value="Jorf Lasfar">Jorf Lasfar</option><option value="Youssoufia">Youssoufia</option><option value="Benguérir">Benguérir</option><option value="Laâyoune">Laâyoune</option></select>
+                            <input type="text" id="trajet-search" placeholder="Rechercher par désignation ou poste..." onkeyup="reinitialiserPaginationEtFiltrer()">
+                        </div>
+                    </div>
+                    <div class="table-container">
+                        <table class="custom-table">
+                            <thead><tr><th>POS</th><th>HEURE DÉPART</th><th>CIRCUIT / ITINÉRAIRE</th><th>DESTINATION</th><th>DISTANCE</th><th>DURÉE</th><th>SHIFT</th><th>TYPE JOUR</th><th>SITE RATTACHÉ</th><th>PRESTATAIRE</th><th>STATUT</th><th class="text-center">ACTIONS</th></tr></thead>
+                            <tbody id="trajets-table-body"></tbody>
+                        </table>
+                    </div>
+                    <div class="pagination-container">
+                        <button onclick="pagePrecedente()" id="btn-page-prev" class="btn-action">◀ Précédent</button>
+                        <span id="pagination-info">Page 1</span>
+                        <button onclick="pageSuivante()" id="btn-page-next" class="btn-action">Suivant ▶</button>
+                    </div>
+                </div>
+                <div id="sub-trajet-ajouter" class="sub-tab-content">
+                    <div class="content-header"><h2>Créer un nouvel itinéraire</h2></div>
+                    <div class="form-container">
+                        <form id="add-trajet-form" onsubmit="ajouterNouveauTrajet(event)">
+                            <div class="form-group"><label>Position (Ex: F1, E3) :</label><input type="text" id="form-t-pos" required></div>
+                            <div class="form-group"><label>Horaire de Départ :</label><input type="time" id="form-t-horaire" required></div>
+                            <div class="form-group"><label>Circuit / Itinéraire :</label><input type="text" id="form-t-nom" required></div>
+                            <div class="form-group"><label>Destination :</label><input type="text" id="form-t-destination" placeholder="Ex: Parc Wafi, Laverie, Mine..." required></div>
+                            <div class="form-group"><label>Distance (KM) :</label><input type="text" id="form-t-km" placeholder="-"></div>
+                            <div class="form-group"><label>Durée estimée :</label><input type="text" id="form-t-duree" required></div>
+                            <div class="form-group"><label>Shift :</label><select id="form-t-shift"><option value="1er">1er Shift</option><option value="2ème">2ème Shift</option><option value="3ème">3ème Shift</option></select></div>
+                            <div class="form-group"><label>Type de Jour :</label><select id="form-t-typejour"><option value="Jours Ouvrables">Jours Ouvrables</option><option value="Dimanche">Dimanche</option><option value="Jours Ouvrables du Ramadan">Jours Ouvrables du Ramadan</option><option value="Dimanche du Ramadan">Dimanche du Ramadan</option></select></div>
+                            <div class="form-group"><label>Prestataire :</label><select id="form-t-provider"><option value="SOTREG">SOTREG</option><option value="STCR">STCR</option><option value="MANAVETTE">MANAVETTE</option><option value="CTM">CTM</option><option value="SUPRATOUR">SUPRATOUR</option></select></div>
+                            <div class="form-group"><label>Site Rattaché :</label><select id="form-t-site"><option value="Khouribga">Khouribga</option><option value="Casablanca">Casablanca</option><option value="Safi">Safi</option><option value="Jorf Lasfar">Jorf Lasfar</option><option value="Youssoufia">Youssoufia</option><option value="Benguérir">Benguérir</option><option value="Laâyoune">Laâyoune</option></select></div>
+                            <button type="submit" class="btn-submit">Enregistrer le trajet</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            <div id="section-planning" class="tab-content section-padding">
+                <div class="submenu-planning-nav" style="display: flex; gap: 15px; margin-bottom: 25px; border-bottom: 1px solid #cbd5e1; padding-bottom: 10px;">
+                    <button class="btn-action active-sub-btn" onclick="basculerSousPlanning('sub-planning-saisie', this)">📋 Saisie Planification</button>
+                    <button class="btn-action" onclick="basculerSousPlanning('sub-planning-calendrier', this)">📅 Calendrier Chronologique</button>
+                    <button class="btn-action" onclick="basculerSousPlanning('sub-planning-quotidien', this)">📊 Tableau Quotidien Intelligent</button>
+                </div>
+
+                <div id="sub-planning-saisie" class="sub-planning-content">
+                    <div class="content-header" style="flex-direction: column; align-items: flex-start; gap: 15px; border-bottom: 1px solid #e2e8f0; padding-bottom: 15px;">
+                        <div class="filter-group" style="flex-wrap: wrap; gap: 10px; width: 100%;">
+                            <select id="plan-provider-filter" onchange="chargerGrillePlanification()"><option value="Tous">Tous prestataires</option><option value="SOTREG" selected>SOTREG</option><option value="STCR">STCR</option></select>
+                            <select id="plan-site-filter" onchange="chargerGrillePlanification()"><option value="Tous">Tous sites</option><option value="Khouribga" selected>Khouribga</option><option value="Casablanca">Casablanca</option></select>
+                            <select id="plan-typejour-filter" onchange="chargerGrillePlanification()">
+                                <option value="Tous">Tous profils</option><option value="Jours Ouvrables" selected>Jours Ouvrables</option><option value="Dimanche">Dimanche</option><option value="Jours Ouvrables du Ramadan">Jours Ouvrables du Ramadan</option><option value="Dimanche du Ramadan">Dimanche du Ramadan</option>
+                            </select>
+                            <input type="text" id="plan-poste-filter" placeholder="POS (ex: F1)..." onkeyup="chargerGrillePlanification()" style="width: 120px; text-transform: uppercase;">
+
+                            <span style="font-weight:700; color:#1e3a8a; margin-left: 10px;">Période - Du :</span>
+                            <input type="date" id="plan-date-debut" style="border:1px solid #4f46e5; font-weight: 600;" onchange="chargerGrillePlanification()">
+                            <span style="font-weight:700; color:#1e3a8a;">Au :</span>
+                            <input type="date" id="plan-date-fin" style="border:1px solid #4f46e5; font-weight: 600;">
+                            
+                            <button type="button" class="btn-action" style="background:#16a34a; color:white; border:none; padding:8px 12px; margin-left:10px; font-weight:700;" onclick="sauvegarderToutesModificationsPlanning()">💾 Enregistrer modifications (Propage par POS)</button>
+                        </div>
+                    </div>
+                    <div class="table-container" style="margin-top: 15px;">
+                        <table class="custom-table">
+                            <thead><tr><th>HEURE</th><th>POSTE</th><th>PROFIL DE JOUR</th><th>CONDUCTEUR ASSIGNÉ</th><th>VÉHICULE ASSIGNÉ</th><th>TRAJET / CIRCUIT</th><th class="text-center">ACTION</th></tr></thead>
+                            <tbody id="planning-grid-table-body"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div id="sub-planning-calendrier" class="sub-planning-content" style="display:none;">
+                    <div style="background: #ffffff; border: 1px solid #e2e8f0; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+                        <h4 style="margin-top:0; margin-bottom:12px; color:#1e293b;">🎯 Profils de jours (Glissez un bloc vers une case du tableau) :</h4>
+                        <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 20px;">
+                            <div class="drag-profile-card" draggable="true" ondragstart="gererDragStart(event, 'Jours Ouvrables')" style="background: #38bdf8;">📅 Jours Ouvrables</div>
+                            <div class="drag-profile-card" draggable="true" ondragstart="gererDragStart(event, 'Dimanche')" style="background: #1e3a8a;">📅 Dimanche</div>
+                            <div class="drag-profile-card" draggable="true" ondragstart="gererDragStart(event, 'Jours Ouvrables du Ramadan')" style="background: #0d9488;">🌙 Jours Ouvrables Ramadan</div>
+                            <div class="drag-profile-card" draggable="true" ondragstart="gererDragStart(event, 'Dimanche du Ramadan')" style="background: #b45309;">🌙 Dimanche Ramadan</div>
+                        </div>
+
+                        <div style="display:flex; align-items:center; gap:20px; background:#f8fafc; padding:12px 15px; border-radius:6px; border: 1px solid #cbd5e1;">
+                            <div style="display:flex; align-items:center; gap:8px;">
+                                <span style="font-weight:700; color:#334155;">📍 Filtrer par Site :</span>
+                                <select id="calendar-site-filter" onchange="genererTableauChronologique()" style="padding:5px 10px; border-radius:4px; border:1px solid #cbd5e1; font-weight:600; background: white;"><option value="Tous">Tous les sites</option><option value="Khouribga" selected>Khouribga</option><option value="Casablanca">Casablanca</option></select>
+                            </div>
+                            <div style="width:1px; height:25px; background:#cbd5e1;"></div>
+                            <div style="display:flex; align-items:center; gap:10px;">
+                                <span style="font-weight:700; color:#334155;">📅 Chronologie du :</span>
+                                <button type="button" onclick="pousserChronologie(-15)" class="btn-action" style="padding: 4px 10px; font-weight:700;">◀</button>
+                                <input type="date" id="calendar-timeline-start" onchange="genererTableauChronologique()" style="padding:5px; border-radius:4px; border:1px solid #cbd5e1; text-align:center; font-weight:600;">
+                                <button type="button" onclick="pousserChronologie(15)" class="btn-action" style="padding: 4px 10px; font-weight:700;">▶</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="table-container" style="overflow-x: auto; padding: 15px;">
+                        <table class="custom-table" style="min-width: 1200px;"><thead id="chronologique-table-header"></thead><tbody id="chronologique-table-body"></tbody></table>
+                    </div>
+                </div>
+
+                <div id="sub-planning-quotidien" class="sub-planning-content" style="display:none;">
+                    <div style="background: #ffffff; border: 1px solid #e2e8f0; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+                        <div style="display:flex; align-items:center; gap:15px; margin-bottom:15px; flex-wrap:wrap;">
+                            <label style="font-weight:700; color:#1e3a8a;">📅 Date d'exploitation :</label>
+                            <input type="date" id="daily-table-date" onchange="chargerTableauQuotidien()" style="padding:5px 10px; border-radius:4px; border:1px solid #cbd5e1; font-weight:600;">
+                        </div>
+                        
+                        <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap:10px; background:#f8fafc; padding:12px; border-radius:6px; border:1px solid #cbd5e1;">
+                            <div><small style="font-weight:700; color:#475569; display:block;">📍 Site :</small><select id="dq-filter-site" onchange="filtrerTableauQuotidienVisuel()" style="width:100%; padding:4px;"><option value="Tous">Tous</option><option value="Khouribga">Khouribga</option><option value="Casablanca">Casablanca</option></select></div>
+                            <div><small style="font-weight:700; color:#475569; display:block;">⏱️ Shift :</small><select id="dq-filter-shift" onchange="filtrerTableauQuotidienVisuel()" style="width:100%; padding:4px;"><option value="Tous" selected>Tous les Shifts</option><option value="1er">1er Shift</option><option value="2ème">2ème Shift</option></select></div>
+                            <div><small style="font-weight:700; color:#475569; display:block;">⚙️ Poste :</small><input type="text" id="dq-filter-poste" placeholder="Ex: F1" onkeyup="filtrerTableauQuotidienVisuel()" style="width:100%; padding:4px; text-transform:uppercase;"></div>
+                            <div><small style="font-weight:700; color:#475569; display:block;">🔔 Statut :</small><select id="dq-filter-status" onchange="filtrerTableauQuotidienVisuel()" style="width:100%; padding:4px;"><option value="Tous">Tous</option><option value="Présent">Présent (Coché)</option><option value="Absent">Absent (Retard)</option></select></div>
+                        </div>
+                    </div>
+                    <div class="table-container">
+                        <table class="custom-table">
+                            <thead><tr><th style="width:80px;">HEURE</th><th style="width:80px;">POSTE</th><th>CONDUCTEUR PRINCIPAL</th><th>VÉHICULE PRINCIPAL</th><th>TRAJET (PROFIL ACTIF)</th><th>REMPL. COND</th><th>REMPL. VEH</th><th style="width:100px; text-align:center;">PRÉSENCE</th></tr></thead>
+                            <tbody id="daily-planning-table-body"><tr><td colspan="8" style="text-align:center; color:#64748b;">Sélectionnez une date.</td></tr></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <div id="section-reclamation" class="tab-content section-padding"><h2>Réclamations</h2></div>
+            <div id="section-dashboard" class="tab-content section-padding"><h2>Dashboard</h2></div>
+            <div id="section-reporting" class="tab-content section-padding"><h2>Reporting</h2></div>
+        </main>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <script>
+        // ==========================================================
+        // 1. VARIABLES, DATA & UTILS (LOCALSTORAGE)
+        // ==========================================================
+        let maCarte, couchePlan, coucheSatelliteHybride;
+        const bornesMaroc = L.latLngBounds([26.3200, -12.8000], [35.7595, -5.8340]);
+        const listePrestataires = ["SOTREG", "STCR", "MANAVETTE", "CTM", "SUPRATOUR"];
+        const couleursProfils = { "Jours Ouvrables": "#38bdf8", "Dimanche": "#1e3a8a", "Jours Ouvrables du Ramadan": "#0d9488", "Dimanche du Ramadan": "#b45309" };
+
+        function initialiserCarte() {
+            if (maCarte) return;
+            couchePlan = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png');
+            coucheSatelliteHybride = L.layerGroup([
+                L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'),
+                L.tileLayer('https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}'),
+                L.tileLayer('https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}')
+            ]);
+            maCarte = L.map('map', { layers: [couchePlan] }).fitBounds(bornesMaroc);
+            L.control.layers({ "🗺️ Mode Plan": couchePlan, "🛰️ Vue Satellite": coucheSatelliteHybride }, null, { position: 'topright' }).addTo(maCarte);
+        }
+
+        const conducteursParDefaut = [
+            { id: 101, nom: "Y.INOUSS", matricule: "59039", prestataire: "SOTREG", site: "Khouribga", permis: "10/06/2026", visite: "15/06/2026", prof: "-", statut: "En repos" },
+            { id: 102, nom: "H.NAAMANE", matricule: "59071", prestataire: "SOTREG", site: "Khouribga", permis: "10/12/2026", visite: "-", prof: "-", statut: "En repos" }
+        ];
+
+        const vehiculesParDefaut = [
+            { id: 201, matricule: "20882-A-57", label: "22462", prestataire: "SOTREG", site: "Khouribga", visiteTech: "10/06/2026", assurance: "20/12/2026", vignette: "-", statut: "Disponible" },
+            { id: 202, matricule: "21106-A-57", label: "22472", prestataire: "SOTREG", site: "Khouribga", visiteTech: "-", assurance: "-", vignette: "-", statut: "Disponible" }
+        ];
+
+        const trajetsParDefaut = [
+            { id:1, pos:"F1", horaire:"04:50", nom:"K - PARC WAFI", destination:"Parc Wafi", km:"-", duree:"40 min", shift:"1er", typeJour:"Jours Ouvrables", site:"Khouribga", prestataire:"SOTREG", statut:"Actif" },
+            { id:2, pos:"E3", horaire:"05:30", nom:"K - BENI IDIR", destination:"Beni Idir", km:"-", duree:"35 min", shift:"1er", typeJour:"Jours Ouvrables", site:"Khouribga", prestataire:"SOTREG", statut:"Actif" },
+            { id:5, pos:"D1", horaire:"06:20", nom:"Dimanche - Circuit Parc Wafi", destination:"Parc Wafi", km:"-", duree:"40 min", shift:"1er", typeJour:"Dimanche", site:"Khouribga", prestataire:"SOTREG", statut:"Actif" }
+        ];
+
+        let conducteursSOTREG = JSON.parse(localStorage.getItem("conducteurs")) || conducteursParDefaut;
+        let vehiculesSOTREG = JSON.parse(localStorage.getItem("vehicules")) || vehiculesParDefaut;
+        let trajetsSOTREG = JSON.parse(localStorage.getItem("trajets")) || trajetsParDefaut;
+        let planningSOTREG = JSON.parse(localStorage.getItem("planning")) || [];
+
+        let htmlOptionsConducteursCache = "";
+        let htmlOptionsVehiculesCache = "";
+
+        function synchroniserDonnees() {
+            localStorage.setItem("planning", JSON.stringify(planningSOTREG));
+            localStorage.setItem("conducteurs", JSON.stringify(conducteursSOTREG));
+            localStorage.setItem("vehicules", JSON.stringify(vehiculesSOTREG));
+            localStorage.setItem("trajets", JSON.stringify(trajetsSOTREG));
+        }
+
+        function enregistrerDonnies() {
+            synchroniserDonnees();
+            precalculerOptionsListes();
+        }
+
+        function precalculerOptionsListes() {
+            htmlOptionsConducteursCache = `<option value="">-- Choisir --</option>` + conducteursSOTREG.sort((a,b)=>a.nom.localeCompare(b.nom)).map(c => `<option value="${c.id}">${c.nom} (${c.matricule})</option>`).join('');
+            htmlOptionsVehiculesCache = `<option value="">-- Choisir --</option>` + vehiculesSOTREG.filter(v=>v.statut!=="En panne").sort((a,b)=>(a.label||a.matricule).localeCompare(b.label||b.matricule)).map(v => `<option value="${v.id}">${v.label || v.matricule}</option>`).join('');
+        }
+
+        function formaterDate(d) { if(!d) return "-"; const p = d.split("-"); return `${p[2]}/${p[1]}/${p[0]}`; }
+        
+        // VÉRIFICATION D'ÉCHÉANCE (ROUGE SI EXPIRE OU < 30 JOURS)
+        function estEnEcheance(dateStr) {
+            if (!dateStr || dateStr === "-") return false;
+            const [d, m, y] = dateStr.split('/').map(Number);
+            const dateEcheance = new Date(y, m - 1, d);
+            const aujourdhui = new Date();
+            const dateAlerte = new Date();
+            dateAlerte.setDate(aujourdhui.getDate() + 30);
+            return dateEcheance <= dateAlerte;
+        }
+
+        // ==========================================================
+        // 2. CONDUCTEURS (Chargement, Édition, Ajout)
+        // ==========================================================
+        function chargerConducteurs() {
+            const tbody = document.getElementById('drivers-table-body'); if(!tbody) return; tbody.innerHTML = "";
+            conducteursSOTREG.forEach(c => {
+                const badge = c.statut === "En mission" ? "status-on" : "status-off";
+                // Application de la logique d'alerte rouge
+                const clPermis = estEnEcheance(c.permis) ? 'date-alerte-rouge' : '';
+                const clVisite = estEnEcheance(c.visite) ? 'date-alerte-rouge' : '';
+                const clProf = estEnEcheance(c.prof) ? 'date-alerte-rouge' : '';
+
+                tbody.innerHTML += `<tr data-site="${c.site}" data-provider="${c.prestataire}">
+                    <td><b>${c.nom}</b> <small style="display:block; color:#64748b; font-weight:bold;">Mle: ${c.matricule}</small></td>
+                    <td><span class="provider-badge">${c.prestataire}</span></td><td><span class="site-badge">${c.site}</span></td>
+                    <td><span class="${clPermis}">${c.permis}</span></td>
+                    <td><span class="${clVisite}">${c.visite}</span></td>
+                    <td><span class="${clProf}">${c.prof}</span></td>
+                    <td><span class="status-badge ${badge}">${c.statut}</span></td>
+                    <td class="text-center">
+                        <div class="action-buttons">
+                            <button class="btn-action" onclick="editerConducteur(${c.id})">📝</button>
+                            <button class="btn-action" onclick="supprimerConducteur(${c.id})">🗑️</button>
+                        </div>
+                    </td>
+                </tr>`;
+            });
+            document.getElementById('kpi-total').innerText = conducteursSOTREG.length;
+        }
+
+        function filtrerConducteurs() {
+            const txt = document.getElementById('driver-search').value.toLowerCase(); const sit = document.getElementById('site-filter').value; const pro = document.getElementById('provider-filter').value;
+            document.querySelectorAll('#drivers-table-body tr').forEach(row => {
+                const mTxt = row.cells[0].innerText.toLowerCase().includes(txt); const mSit = (sit === "Tous" || row.getAttribute('data-site') === sit); const mPro = (pro === "Tous" || row.getAttribute('data-provider') === pro);
+                row.style.display = (mTxt && mSit && mPro) ? "" : "none";
+            });
+        }
+
+        function ajouterNouveauConducteur(e) { e.preventDefault(); conducteursSOTREG.unshift({ id: Date.now(), nom: document.getElementById('form-nom').value, matricule: document.getElementById('form-mle').value, prestataire: document.getElementById('form-provider').value, site: document.getElementById('form-site').value, permis: formaterDate(document.getElementById('form-permis').value), visite: formaterDate(document.getElementById('form-visite').value), prof: formaterDate(document.getElementById('form-prof').value), statut: "En repos" }); enregistrerDonnies(); document.getElementById('add-driver-form').reset(); document.querySelector('[data-sub-target="sub-conducteur-liste"]').click(); }
+        
+        function editerConducteur(id) {
+            const c = conducteursSOTREG.find(x => x.id === id); if(!c) return;
+            c.nom = prompt("Nom complet:", c.nom) || c.nom;
+            c.matricule = prompt("Matricule:", c.matricule) || c.matricule;
+            c.permis = prompt("Echéance Permis (JJ/MM/AAAA):", c.permis) || c.permis;
+            c.visite = prompt("Echéance Visite Sys (JJ/MM/AAAA):", c.visite) || c.visite;
+            c.prof = prompt("Echéance Carte Prof (JJ/MM/AAAA):", c.prof) || c.prof;
+            c.statut = prompt("Statut (En repos / En mission):", c.statut) || c.statut;
+            enregistrerDonnies(); chargerConducteurs();
+        }
+        
+        function supprimerConducteur(id) { if(confirm("Supprimer ce conducteur ?")) { conducteursSOTREG = conducteursSOTREG.filter(c => c.id !== id); enregistrerDonnies(); chargerConducteurs(); } }
+
+        // ==========================================================
+        // 3. VÉHICULES (Chargement, Édition, Ajout)
+        // ==========================================================
+        function chargerVehicules() {
+            const tbody = document.getElementById('vehicules-table-body'); if(!tbody) return; tbody.innerHTML = "";
+            vehiculesSOTREG.forEach(v => {
+                const badge = (v.statut === "Disponible" || v.statut === "En circulation") ? "status-on" : "status-off";
+                // Application de la logique d'alerte rouge
+                const clVisite = estEnEcheance(v.visiteTech) ? 'date-alerte-rouge' : '';
+                const clAssur = estEnEcheance(v.assurance) ? 'date-alerte-rouge' : '';
+                const clVignette = estEnEcheance(v.vignette) ? 'date-alerte-rouge' : '';
+
+                tbody.innerHTML += `<tr data-site="${v.site}" data-provider="${v.prestataire}">
+                    <td><b>${v.matricule}</b></td><td><b>${v.label || '-'}</b></td>
+                    <td><span class="provider-badge">${v.prestataire}</span></td><td><span class="site-badge">${v.site}</span></td>
+                    <td><span class="${clVisite}">${v.visiteTech}</span></td>
+                    <td><span class="${clAssur}">${v.assurance}</span></td>
+                    <td><span class="${clVignette}">${v.vignette}</span></td>
+                    <td><span class="status-badge ${badge}">${v.statut}</span></td>
+                    <td class="text-center">
+                        <div class="action-buttons">
+                            <button class="btn-action" onclick="editerVehicule(${v.id})">📝</button>
+                            <button class="btn-action" onclick="supprimerVehicule(${v.id})">🗑️</button>
+                        </div>
+                    </td>
+                </tr>`;
+            });
+            document.getElementById('kpi-vehicule-total').innerText = vehiculesSOTREG.length;
+        }
+
+        function filtrerVehicules() {
+            const txt = document.getElementById('vehicule-search').value.toLowerCase(); const sit = document.getElementById('vehicule-site-filter').value; const pro = document.getElementById('vehicule-provider-filter').value;
+            document.querySelectorAll('#vehicules-table-body tr').forEach(row => {
+                const mTxt = row.cells[0].innerText.toLowerCase().includes(txt); const mSit = (sit === "Tous" || row.getAttribute('data-site') === sit); const mPro = (pro === "Tous" || row.getAttribute('data-provider') === pro);
+                row.style.display = (mTxt && mSit && mPro) ? "" : "none";
+            });
+        }
+
+        function ajouterNouveauVehicule(e) { e.preventDefault(); vehiculesSOTREG.unshift({ id: Date.now(), matricule: document.getElementById('form-v-matricule').value, label: document.getElementById('form-v-label').value, prestataire: document.getElementById('form-v-provider').value, site: document.getElementById('form-v-site').value, visiteTech: formaterDate(document.getElementById('form-v-visite').value), assurance: formaterDate(document.getElementById('date-assurance').value), vignette: formaterDate(document.getElementById('form-v-vignette').value), statut: "Disponible" }); enregistrerDonnies(); document.getElementById('add-vehicule-form').reset(); document.querySelector('[data-sub-target="sub-vehicule-liste"]').click(); }
+        
+        function editerVehicule(id) {
+            const v = vehiculesSOTREG.find(x => x.id === id); if(!v) return;
+            v.matricule = prompt("Matricule:", v.matricule) || v.matricule;
+            v.label = prompt("Label:", v.label) || v.label;
+            v.visiteTech = prompt("Echéance Visite Tech (JJ/MM/AAAA):", v.visiteTech) || v.visiteTech;
+            v.assurance = prompt("Echéance Assurance (JJ/MM/AAAA):", v.assurance) || v.assurance;
+            v.vignette = prompt("Echéance Vignette (JJ/MM/AAAA):", v.vignette) || v.vignette;
+            enregistrerDonnies(); chargerVehicules();
+        }
+
+        function supprimerVehicule(id) { if(confirm("Supprimer ce véhicule ?")) { vehiculesSOTREG = vehiculesSOTREG.filter(v => v.id !== id); enregistrerDonnies(); chargerVehicules(); } }
+
+        // ==========================================================
+        // 4. TRAJETS
+        // ==========================================================
+        let pageActuelle = 1; const lignesParPage = 13; let trajetsFiltrés = [];
+        function chargerTrajets() {
+            const txt = document.getElementById('trajet-search').value.toLowerCase(); const pro = document.getElementById('trajet-provider-filter').value; const sit = document.getElementById('trajet-site-filter').value;
+            trajetsFiltrés = trajetsSOTREG.filter(t => (pro === "Tous" || t.prestataire === pro) && (sit === "Tous" || t.site === sit) && (t.nom.toLowerCase().includes(txt) || t.pos.toLowerCase().includes(txt)));
+            trajetsFiltrés.sort((a, b) => a.pos.localeCompare(b.pos, undefined, { numeric: true, sensitivity: 'base' }));
+            const totalPages = Math.ceil(trajetsFiltrés.length / lignesParPage) || 1;
+            if (pageActuelle > totalPages) pageActuelle = totalPages;
+            const tbody = document.getElementById('trajets-table-body'); if(!tbody) return; tbody.innerHTML = "";
+            trajetsFiltrés.slice((pageActuelle - 1) * lignesParPage, pageActuelle * lignesParPage).forEach(t => {
+                tbody.innerHTML += `<tr>
+                    <td><b style="color: #4f46e5;">${t.pos}</b></td><td><span class="status-badge" style="background:#f1f5f9;">${t.horaire}</span></td>
+                    <td>${t.nom}</td><td><b style="color: #0284c7;">${t.destination || '-'}</b></td><td>${t.km}</td><td><b>${t.duree}</b></td>
+                    <td><span class="site-badge">${t.shift}</span></td><td><span class="site-badge" style="background:#f0fdfa; color:#0d9488;">${t.typeJour}</span></td>
+                    <td>${t.site}</td><td><span class="provider-badge">${t.prestataire}</span></td><td><span class="status-badge status-on">${t.statut}</span></td>
+                    <td class="text-center"><button class="btn-action" onclick="supprimerTrajet(${t.id})">🗑️</button></td>
+                </tr>`;
+            });
+            document.getElementById('pagination-info').innerText = `Page ${pageActuelle} sur ${totalPages}`;
+            document.getElementById('kpi-trajet-total').innerText = trajetsFiltrés.length;
+        }
+        function editertrajet(id) {
+            const c = trajetSOTREG.find(x => x.id === id); if(!c) return;
+            c.pos = prompt("Position:", c.pos) || c.pos;
+            c.heureTrajetStr = prompt("Heure du trajet:", c.heureTrajetStr) || c.heureTrajetStr;
+            c.circuit= prompt("circuit:", c.circuit) || c.circuit;
+            c.destination= prompt("Destination:", c.destination) || c.destination;
+            c.distance= prompt("Distance:", c.distance) || c.distance;
+            c.duree = prompt("Durée:", c.duree) || c.duree;
+            c.shift = prompt("Shift (1er / 2ème/3ème):", c.shift) || c.shift;
+            c.typeJour = prompt("Type de jour (Jours Ouvrables / Dimanche / Jours Ouvrables du Ramadan / Dimanche du Ramadan):", c.typeJour) || c.typeJour;
+            C.siteFiltre = prompt("Site (Khouribga /El jadida/Safi/Laayoun/Youssoufia/Benguerir):", c.site) || c.site;
+            c.prestataire = prompt("Prestataire (SOTREG/STCR/MANAVETTE/CTM/SUPRATOUR):", c.prestataire) || c.prestataire;
+            c.statut = prompt("Statut (Actif / Inactif):", c.statut) || c.statut;   
+            enregistrerDonnies(); chargerConducteurs();
+        }
+        function reinitialiserPaginationEtFiltrer() { pageActuelle = 1; chargerTrajets(); }
+        function pagePrecedente() { if (pageActuelle > 1) { pageActuelle--; chargerTrajets(); } }
+        function pageSuivante() { if (pageActuelle < Math.ceil(trajetsFiltrés.length / lignesParPage)) { pageActuelle++; chargerTrajets(); } }
+        function ajouterNouveauTrajet(e) { e.preventDefault(); trajetsSOTREG.unshift({ id: Date.now(), pos: document.getElementById('form-t-pos').value, horaire: document.getElementById('form-t-horaire').value, nom: document.getElementById('form-t-nom').value, destination: document.getElementById('form-t-destination').value, km: document.getElementById('form-t-km').value || "-", duree: document.getElementById('form-t-duree').value, shift: document.getElementById('form-t-shift').value, typeJour: document.getElementById('form-t-typejour').value, prestataire: document.getElementById('form-t-provider').value, site: document.getElementById('form-t-site').value, statut: "Actif" }); enregistrerDonnies(); document.getElementById('add-trajet-form').reset(); document.querySelector('[data-sub-target="sub-trajet-liste"]').click(); }
+        function supprimerTrajet(id) { if(confirm("Supprimer ce trajet ?")) { trajetsSOTREG = trajetsSOTREG.filter(t => t.id !== id); enregistrerDonnies(); chargerTrajets(); } }
+
+        // ==========================================================
+        // 5. PLANIFICATION GLOBALE
+        // ==========================================================
+        function basculerSousPlanning(paneId, boutonActif) {
+            document.querySelectorAll('.sub-planning-content').forEach(pane => pane.style.display = 'none');
+            document.getElementById(paneId).style.display = 'block';
+            if(boutonActif) {
+                document.querySelectorAll('.submenu-planning-nav .btn-action').forEach(btn => btn.classList.remove('active-sub-btn'));
+                boutonActif.classList.add('active-sub-btn');
+            }
+            if (paneId === 'sub-planning-saisie') chargerGrillePlanification();
+            if (paneId === 'sub-planning-calendrier') genererTableauChronologique();
+            if (paneId === 'sub-planning-quotidien') {
+                const dInput = document.getElementById('daily-table-date');
+                if(!dInput.value) dInput.value = new Date().toISOString().slice(0, 10);
+                chargerTableauQuotidien();
+            }
+        }
+
+        // ==========================================================
+        // 5A. SAISIE PLANIFICATION & PROPAGATION POS
+        // ==========================================================
+        function chargerGrillePlanification() {
+            const inputDate = document.getElementById('plan-date-debut').value;
+            const tbody = document.getElementById('planning-grid-table-body'); if (!tbody) return;
+            const proFiltre = document.getElementById('plan-provider-filter').value;
+            const sitFiltre = document.getElementById('plan-site-filter').value;
+            const tjFiltre = document.getElementById('plan-typejour-filter').value; 
+            const posFiltre = document.getElementById('plan-poste-filter').value.trim().toLowerCase();
+
+            const trajetsFiltres = trajetsSOTREG.filter(t => {
+                return (proFiltre === "Tous" || t.prestataire === proFiltre) && 
+                       (sitFiltre === "Tous" || t.site === sitFiltre) &&
+                       (posFiltre === "" || t.pos.toLowerCase().includes(posFiltre)) &&
+                       (tjFiltre === "Tous" || (t.typeJour || "Jours Ouvrables") === tjFiltre);
+            });
+
+            if (trajetsFiltres.length === 0) { tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:#ef4444; padding:20px;">Aucun trajet trouvé pour ce profil.</td></tr>`; return; }
+
+            const dateFormatee = inputDate ? formaterDate(inputDate) : null;
+            let accumulationHtml = "";
+            
+            trajetsFiltres.sort((a,b)=>a.horaire.localeCompare(b.horaire)).forEach(t => {
+                const aff = planningSOTREG.find(p => p.date === dateFormatee && p.trajetId === t.id);
+                const profilCourant = t.typeJour || "Jours Ouvrables";
+                const estAffecte = Boolean(aff && (aff.conducteurId || aff.vehiculeId));
+                
+                accumulationHtml += `<tr>
+                    <td><span class="status-badge" style="background:#f1f5f9; border:1px solid #cbd5e1;">${t.horaire}</span></td>
+                    <td><b style="color:#1e3a8a;">${t.pos}</b></td>
+                    <td><span class="site-badge" style="background:#f0fdfa; color:#0d9488;">${profilCourant}</span></td>
+                    <td><select id="row-driver-${t.id}" style="width:100%; padding:4px; font-weight:600; border-radius:4px;">${htmlOptionsConducteursCache.replace(`value="${aff?.conducteurId||''}"`, `value="${aff?.conducteurId||''}" selected`)}</select></td>
+                    <td><select id="row-vehicule-${t.id}" style="width:100%; padding:4px; font-weight:600; border-radius:4px;">${htmlOptionsVehiculesCache.replace(`value="${aff?.vehiculeId||''}"`, `value="${aff?.vehiculeId||''}" selected`)}</select></td>
+                    <td><small>${t.nom}</small></td>
+                    <td class="text-center"><button class="btn-action" style="color:white; background:${estAffecte?'#0284c7':'#16a34a'}; border:none;" onclick="validerLignePlanning(${t.id})">${estAffecte?'Mettre à jour':'Valider Ligne'}</button></td>
+                </tr>`;
+            });
+            tbody.innerHTML = accumulationHtml;
+        }
+
+        // Sauvegarde unitaire par ligne + Propagation POS
+        function validerLignePlanning(trajetId) {
+            const dateDebutStr = document.getElementById('plan-date-debut').value;
+            const dateFinStr = document.getElementById('plan-date-fin').value || dateDebutStr;
+            const profilSelectionne = document.getElementById('plan-typejour-filter').value;
+            const cId = document.getElementById(`row-driver-${trajetId}`).value;
+            const vId = document.getElementById(`row-vehicule-${trajetId}`).value;
+
+            if (!dateDebutStr) { alert("⚠️ Sélectionnez une date de début."); return; }
+
+            const trajetSel = trajetsSOTREG.find(t => t.id === trajetId);
+            const tousTrajetsDuPoste = trajetsSOTREG.filter(t => t.pos === trajetSel.pos); // PROPAGATION
+
+            let dateCourante = new Date(dateDebutStr); 
+            const dateFinObj = new Date(dateFinStr);
+
+            while (dateCourante <= dateFinObj) {
+                const dFormateeFr = formaterDate(`${dateCourante.getFullYear()}-${String(dateCourante.getMonth()+1).padStart(2,'0')}-${String(dateCourante.getDate()).padStart(2,'0')}`);
+                tousTrajetsDuPoste.forEach(tDuPoste => {
+                    planningSOTREG = planningSOTREG.filter(p => !(p.date === dFormateeFr && p.trajetId === tDuPoste.id));
+                    planningSOTREG.push({ id: Date.now()+Math.random(), date: dFormateeFr, trajetId: tDuPoste.id, typeJour: profilSelectionne, vehiculeId: vId?parseInt(vId):"", conducteurId: cId?parseInt(cId):"", absent: true, remplaceConducteurId: "", remplaceVehiculeId: "" });
+                });
+                dateCourante.setDate(dateCourante.getDate() + 1);
+            }
+            enregistrerDonnies(); chargerGrillePlanification(); alert(`✅ Ligne validée et propagée pour le poste ${trajetSel.pos}`);
+        }
+
+        // Sauvegarde de masse + Propagation POS
+        function sauvegarderToutesModificationsPlanning() {
+            const dateDebutStr = document.getElementById('plan-date-debut').value;
+            const dateFinStr = document.getElementById('plan-date-fin').value || dateDebutStr;
+            const profilSelectionne = document.getElementById('plan-typejour-filter').value;
+            if (!dateDebutStr) { alert("⚠️ Sélectionnez une date de début."); return; }
+            
+            const dateDebut = new Date(dateDebutStr); const dateFin = new Date(dateFinStr);
+            const rows = document.querySelectorAll('#planning-grid-table-body tr');
+
+            rows.forEach(row => {
+                const driverSelect = row.querySelector('select[id^="row-driver-"]');
+                const vehiculeSelect = row.querySelector('select[id^="row-vehicule-"]');
+                if (!driverSelect) return;
+
+                const trajetId = parseInt(driverSelect.id.replace('row-driver-', ''), 10);
+                const trajet = trajetsSOTREG.find(t => t.id === trajetId);
+                const cId = driverSelect.value; const vId = vehiculeSelect.value;
+
+                // PROPAGATION
+                const trajetsMemePoste = trajetsSOTREG.filter(t => t.pos === trajet.pos);
+
+                let currentDate = new Date(dateDebut);
+                while (currentDate <= dateFin) {
+                    const fd = formaterDate(`${currentDate.getFullYear()}-${String(currentDate.getMonth()+1).padStart(2,'0')}-${String(currentDate.getDate()).padStart(2,'0')}`);
+                    trajetsMemePoste.forEach(tm => {
+                        planningSOTREG = planningSOTREG.filter(p => !(p.date === fd && p.trajetId === tm.id));
+                        planningSOTREG.push({ id: Date.now()+Math.random(), date: fd, trajetId: tm.id, typeJour: profilSelectionne, conducteurId: cId?parseInt(cId):"", vehiculeId: vId?parseInt(vId):"", absent: true, remplaceConducteurId: "", remplaceVehiculeId: "" });
+                    });
+                    currentDate.setDate(currentDate.getDate() + 1);
+                }
+            });
+            enregistrerDonnies(); chargerGrillePlanification(); alert("✅ Sauvegarde massive et propagation par poste effectuées.");
+        }
+
+        // ==========================================================
+        // 5B. CALENDRIER CHRONOLOGIQUE
+        // ==========================================================
+        function gererDragStart(e, typeJourSelected) { e.dataTransfer.setData("text/plain", typeJourSelected); }
+        function pousserChronologie(nbJours) {
+            const inputStart = document.getElementById('calendar-timeline-start');
+            let d = new Date(inputStart.value || new Date()); d.setDate(d.getDate() + nbJours);
+            inputStart.value = d.toISOString().slice(0, 10); genererTableauChronologique();
+        }
+
+        function genererTableauChronologique() {
+            const inputStart = document.getElementById('calendar-timeline-start');
+            if(!inputStart.value) inputStart.value = new Date().toISOString().slice(0, 10);
+            const headTr = document.getElementById('chronologique-table-header');
+            const tbody = document.getElementById('chronologique-table-body');
+            const siteFiltre = document.getElementById('calendar-site-filter').value;
+            
+            headTr.innerHTML = "<tr><th style='width:150px; background:#f8fafc;'>PRESTATAIRE</th></tr>"; tbody.innerHTML = "";
+            let dates = []; let dateBase = new Date(inputStart.value);
+
+            for(let i = 0; i < 15; i++) {
+                let d = new Date(dateBase); d.setDate(dateBase.getDate() + i);
+                dates.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2,'0')}`);
+                const th = document.createElement('th'); th.style.textAlign='center'; th.style.fontSize='12px';
+                th.innerHTML = `<span style='color:#64748b; text-transform:uppercase;'>${d.toLocaleDateString('fr-FR', {weekday:'short'})}</span><br><b>${d.getDate()}/${d.getMonth()+1}</b>`;
+                headTr.appendChild(th);
+            }
+
+            listePrestataires.forEach(pres => {
+                const tr = document.createElement('tr'); tr.innerHTML = `<td style='font-weight:800; background:#f1f5f9; color:#1e3a8a;'>${pres}</td>`;
+                dates.forEach(dateBrute => {
+                    const td = document.createElement('td'); td.style.textAlign='center'; td.style.height='45px'; td.style.border='1px solid #cbd5e1';
+                    td.addEventListener('dragover', e => e.preventDefault());
+                    td.addEventListener('drop', e => {
+                        e.preventDefault();
+                        const typeJourAssigne = e.dataTransfer.getData("text/plain"); if(!typeJourAssigne) return;
+                        const df = formaterDate(dateBrute);
+                        const trajets = trajetsSOTREG.filter(t => t.prestataire === pres && (t.typeJour||"Jours Ouvrables") === typeJourAssigne && (siteFiltre === "Tous" || t.site === siteFiltre));
+                        if(trajets.length === 0) { alert(`Aucun trajet rattaché pour ${pres} en ${typeJourAssigne}.`); return; }
+
+                        // On nettoie la date pour ce prestataire/site et on insère la règle du profil
+                        planningSOTREG = planningSOTREG.filter(p => { const t = trajetsSOTREG.find(x => x.id === p.trajetId); return !(p.date === df && t && t.prestataire === pres && (siteFiltre === "Tous" || t.site === siteFiltre)); });
+                        trajets.forEach(t => { planningSOTREG.push({ id: Date.now()+Math.random(), date: df, trajetId: t.id, typeJour: typeJourAssigne, vehiculeId: "", conducteurId: "", absent: true, remplaceConducteurId: "", remplaceVehiculeId: "" }); });
+                        enregistrerDonnies(); genererTableauChronologique();
+                    });
+
+                    const dFr = formaterDate(dateBrute);
+                    const servicesDuJour = planningSOTREG.filter(p => p.date === dFr);
+                    let profilAffiche = null;
+                    for (let p of servicesDuJour) {
+                        const t = trajetsSOTREG.find(x => x.id === p.trajetId);
+                        if (t && t.prestataire === pres && (siteFiltre === "Tous" || t.site === siteFiltre)) { profilAffiche = p.typeJour || t.typeJour || "Jours Ouvrables"; break; }
+                    }
+                    if(profilAffiche) { td.style.backgroundColor = couleursProfils[profilAffiche]; td.innerHTML = `<small style='color:white; font-weight:700; font-size:10px;'>${profilAffiche}</small>`; }
+                    tr.appendChild(td);
+                });
+                tbody.appendChild(tr);
+            });
+        }
+
+        // ==========================================================
+        // 5C. TABLEAU QUOTIDIEN (Intelligent & Auto Profil)
+        // ==========================================================
+        function evaluerRetardHoraireMaroc(heureTrajetStr, dateExploitationStr) {
+            if (!heureTrajetStr || !heureTrajetStr.includes(':')) return false;
+            const maintenant = new Date();
+            const formatMarocDate = new Intl.DateTimeFormat('fr-FR', { timeZone: 'Africa/Casablanca', year: 'numeric', month: '2-digit', day: '2-digit' });
+            const fDate = formatMarocDate.format(maintenant).split('/');
+            const dateDuJourMaroc = `${fDate[2]}-${fDate[1]}-${fDate[0]}`;
+            if (dateExploitationStr < dateDuJourMaroc) return true;
+            if (dateExploitationStr > dateDuJourMaroc) return false;
+            const formatMarocHeure = new Intl.DateTimeFormat('fr-FR', { timeZone: 'Africa/Casablanca', hour: '2-digit', minute: '2-digit', hour12: false });
+            const fHeure = formatMarocHeure.format(maintenant).split(':');
+            return (parseInt(fHeure[0], 10) * 60 + parseInt(fHeure[1], 10)) >= (parseInt(heureTrajetStr.split(':')[0], 10) * 60 + parseInt(heureTrajetStr.split(':')[1], 10));
+        }
+
+        function chargerTableauQuotidien() {
+            const inputDate = document.getElementById('daily-table-date').value;
+            const tbody = document.getElementById('daily-planning-table-body');
+            if (!tbody || !inputDate) return;
+
+            const dateRecherchee = formaterDate(inputDate);
+            
+            // 1. Lire le planning prévu pour ce jour
+            const duJour = planningSOTREG.filter(p => p.date === dateRecherchee);
+            
+            if (duJour.length === 0) { tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; color:#ef4444; padding:20px; font-weight:bold;">Aucune planification (profil de jour) trouvée pour le ${dateRecherchee} dans le calendrier.</td></tr>`; return; }
+            
+            // Détection du Profil
+            const profilDuJour = duJour[0].typeJour || "Jours Ouvrables";
+
+            let accumulationHtml = "";
+            duJour.sort((a, b) => (trajetsSOTREG.find(t=>t.id===a.trajetId)?.horaire || "").localeCompare(trajetsSOTREG.find(t=>t.id===b.trajetId)?.horaire)).forEach(p => {
+                const trajet = trajetsSOTREG.find(t => t.id === p.trajetId);
+                if (!trajet) return;
+
+                const vehicule = vehiculesSOTREG.find(v => v.id === p.vehiculeId) || {};
+                const cond = conducteursSOTREG.find(c => c.id === p.conducteurId) || {};
+
+                const estCoche = (p.absent === false || String(p.absent) === 'false');
+                const estEnRetard = evaluerRetardHoraireMaroc(trajet.horaire, inputDate);
+
+                // CLASSE DE COULEUR
+                let classeOmbreStyle = "cell-attente-orange"; // Par défaut = en attente (orange)
+                if (estCoche) classeOmbreStyle = "cell-valide-verte"; // Coché = Vert
+                else if (estEnRetard) classeOmbreStyle = "cell-alerte-rouge"; // Non coché + Retard = Rouge clignotant
+
+                const condOptions = `<option value="">-- Remplaçant --</option>` + conducteursSOTREG.sort((a,b)=>a.nom.localeCompare(b.nom)).map(c => `<option value="${c.id}" ${String(c.id)===String(p.remplaceConducteurId)?'selected':''}>${c.nom}</option>`).join('');
+                const vehOptions = `<option value="">-- Remplaçant --</option>` + vehiculesSOTREG.filter(v=>v.statut!=="En panne").sort((a,b)=>a.matricule.localeCompare(b.matricule)).map(v => `<option value="${v.id}" ${String(v.id)===String(p.remplaceVehiculeId)?'selected':''}>${v.matricule}</option>`).join('');
+
+                accumulationHtml += `
+                <tr id="dq-row-${p.id}" class="${classeOmbreStyle}" data-site="${trajet.site||''}" data-provider="${trajet.prestataire||''}" data-shift="${trajet.shift||''}" data-pos="${trajet.pos||''}" data-driver="${p.conducteurId||''}" data-vehicule="${p.vehiculeId||''}" data-absent="${!estCoche?'oui':'non'}">
+                    <td><span class="status-badge" style="background:#fff; border:1px solid #cbd5e1; color:#334155;">${trajet.horaire||'-'}</span></td>
+                    <td><b style="color:#4f46e5; font-size:14px;">${trajet.pos||'-'}</b></td>
+                    <td><b>${cond.nom||'<i style="color:#94a3b8;font-weight:normal;">Non planifié</i>'}</b></td>
+                    <td><b style="color:#1e3a8a;">${vehicule.label||'<i style="color:#94a3b8;font-weight:normal;">Non planifié</i>'}</b></td>
+                    <td><small>${trajet.nom||'-'}</small><br><span class="site-badge" style="background:#e0f2fe; color:#0369a1;">${profilDuJour}</span></td>
+                    <td><select onchange="sauvegarderRemplaçant('${p.id}', 'driver', this)" style="width:100%; padding:4px; border:1px solid #cbd5e1; border-radius:4px;">${condOptions}</select></td>
+                    <td><select onchange="sauvegarderRemplaçant('${p.id}', 'vehicule', this)" style="width:100%; padding:4px; border:1px solid #cbd5e1; border-radius:4px;">${vehOptions}</select></td>
+                    <td style="text-align:center; vertical-align:middle;"><input type="checkbox" style="width:22px; height:22px; cursor:pointer;" onchange="ajusterPresenceAOmbre('${p.id}', this)" ${estCoche?'checked':''}></td>
+                </tr>`;
+            });
+            tbody.innerHTML = accumulationHtml;
+            filtrerTableauQuotidienVisuel();
+        }
+
+        function ajusterPresenceAOmbre(planningId, checkboxElement) {
+            const idx = planningSOTREG.findIndex(x => String(x.id) === String(planningId));
+            if (idx !== -1) {
+                planningSOTREG[idx].absent = !checkboxElement.checked;
+                synchroniserDonnees();
+                
+                const row = document.getElementById(`dq-row-${planningId}`);
+                if(row) {
+                    row.setAttribute('data-absent', planningSOTREG[idx].absent ? 'oui' : 'non');
+                    row.classList.remove('cell-attente-orange', 'cell-alerte-rouge', 'cell-valide-verte');
+                    
+                    if(!checkboxElement.checked) {
+                        // Re-vérifier le retard si on décoche
+                        const tId = planningSOTREG[idx].trajetId;
+                        const trj = trajetsSOTREG.find(t => t.id === tId);
+                        const estEnRetard = trj ? evaluerRetardHoraireMaroc(trj.horaire, document.getElementById('daily-table-date').value) : false;
+                        row.classList.add(estEnRetard ? 'cell-alerte-rouge' : 'cell-attente-orange');
+                    } else {
+                        row.classList.add('cell-valide-verte');
+                    }
+                }
+            }
+        }
+
+        function sauvegarderRemplaçant(planningId, type, selectElement) {
+            const idx = planningSOTREG.findIndex(x => String(x.id) === String(planningId));
+            if (idx !== -1) {
+                const val = selectElement.value ? parseInt(selectElement.value) : "";
+                if (type === 'driver') planningSOTREG[idx].remplaceConducteurId = val;
+                if (type === 'vehicule') planningSOTREG[idx].remplaceVehiculeId = val;
+                synchroniserDonnees(); 
+            }
+        }
+
+        function filtrerTableauQuotidienVisuel() {
+            const sit = document.getElementById('dq-filter-site').value; const pro = document.getElementById('dq-filter-provider').value;
+            const shf = document.getElementById('dq-filter-shift').value; const pos = document.getElementById('dq-filter-poste').value.trim().toLowerCase();
+            const stat = document.getElementById('dq-filter-status').value;
+
+            document.querySelectorAll('#daily-planning-table-body tr').forEach(row => {
+                if(!row.hasAttribute('data-pos')) return;
+                const mSit = (sit==="Tous"||row.getAttribute('data-site')===sit); const mPro = (pro==="Tous"||row.getAttribute('data-provider')===pro);
+                const mShf = (shf==="Tous"||row.getAttribute('data-shift')===shf); const mPos = (pos===""||row.getAttribute('data-pos').toLowerCase().includes(pos));
+                let mStat = true;
+                if(stat==="Présent") mStat = (row.getAttribute('data-absent')==='non');
+                if(stat==="Absent") mStat = (row.getAttribute('data-absent')==='oui');
+                row.style.display = (mSit&&mPro&&mShf&&mPos&&mStat)?"":"none";
+            });
+        }
+
+        // ==========================================================
+        // 6. ROUTAGE ET INITIALISATION
+        // ==========================================================
+        document.querySelectorAll('.menu-link').forEach(link => {
+            link.addEventListener('click', (e) => {
+                e.preventDefault(); const tId = link.getAttribute('data-target');
+                document.querySelectorAll('.menu-link').forEach(l => l.classList.remove('active')); link.classList.add('active');
+                document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active')); document.getElementById(tId).classList.add('active');
+                document.querySelectorAll('.submenu').forEach(sub => sub.classList.remove('open'));
+                
+                if(tId === 'section-conducteur') { document.getElementById('submenu-conducteur').classList.add('open'); document.querySelector('[data-sub-target="sub-conducteur-liste"]').click(); } 
+                if(tId === 'section-vehicule') { document.getElementById('submenu-vehicule').classList.add('open'); document.querySelector('[data-sub-target="sub-vehicule-liste"]').click(); } 
+                if(tId === 'section-trajet') { document.getElementById('submenu-trajet').classList.add('open'); document.querySelector('[data-sub-target="sub-trajet-liste"]').click(); } 
+                if(tId === 'section-planning') { basculerSousPlanning('sub-planning-saisie', document.querySelectorAll('.submenu-planning-nav .btn-action')[0]); }
+                if(tId === 'section-flotte') { initialiserCarte(); setTimeout(() => { if (maCarte) maCarte.invalidateSize(); }, 50); }
+            });
+        });
+
+        document.querySelectorAll('.submenu-link').forEach(subLink => {
+            subLink.addEventListener('click', (e) => {
+                e.preventDefault(); e.stopPropagation();
+                subLink.closest('.submenu').querySelectorAll('.submenu-link').forEach(sl => sl.classList.remove('active-sub')); subLink.classList.add('active-sub');
+                const sT = subLink.getAttribute('data-sub-target');
+                document.querySelectorAll('.sub-tab-content').forEach(sc => sc.classList.remove('active-sub-content')); document.getElementById(sT).classList.add('active-sub-content');
+                if(sT==='sub-conducteur-liste') chargerConducteurs(); if(sT==='sub-vehicule-liste') chargerVehicules(); if(sT==='sub-trajet-liste') reinitialiserPaginationEtFiltrer();
+            });
+        });
+
+        document.getElementById('toggle-menu-btn').addEventListener('click', () => { document.getElementById('sidebarMenu').classList.toggle('closed'); document.getElementById('appLayout').classList.toggle('menu-closed'); });
+
+        window.addEventListener('DOMContentLoaded', () => { 
+            precalculerOptionsListes(); initialiserCarte(); chargerVehicules(); chargerConducteurs(); 
+            
+            // Rafraîchissement automatique des retards
+            setInterval(() => { const qC = document.getElementById('sub-planning-quotidien'); if(qC && qC.style.display !== 'none') chargerTableauQuotidien(); }, 30000); 
+            
+            // Horloge en temps réel (Maroc)
+            setInterval(() => {
+                const fD = new Intl.DateTimeFormat('fr-FR', { timeZone: 'Africa/Casablanca', weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+                const fH = new Intl.DateTimeFormat('fr-FR', { timeZone: 'Africa/Casablanca', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+                const m = new Date(); document.getElementById('live-clock').innerHTML = `<strong>${fD.format(m)}</strong> — <span>${fH.format(m)}</span>`;
+            }, 1000);
+        });
+    </script>
+</body>
+</html>
